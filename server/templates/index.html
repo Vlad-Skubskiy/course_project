@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Моніторинг DeltaPlan</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            display: flex;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 900px;
+        }
+
+        h1 {
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status {
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .online {
+            color: #27ae60;
+        }
+
+        .offline {
+            color: #e74c3c;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            color: #555;
+            cursor: default;
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+
+        .new-row {
+            background-color: #e8f5e9 !important;
+            animation: highlight 2s ease-out;
+        }
+
+        @keyframes highlight {
+            from {
+                background-color: #c8e6c9;
+            }
+
+            to {
+                background-color: transparent;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>💊 Моніторинг DeltaPlan</h1>
+        <div class="status">Статус сервера: <span id="status" class="offline">Відключено</span></div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Час скану</th>
+                    <th>Пристрій</th>
+                    <th>Назва ліків / UUID</th>
+                    <th>Графік</th>
+                    <th>Доза</th>
+                </tr>
+            </thead>
+            <tbody id="logs">
+                <!-- Дані завантажуються тут -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Модальне вікно -->
+    <div id="editModal"
+        style="display:none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+        <div
+            style="background-color: white; margin: 15% auto; padding: 25px; border-radius: 12px; width: 320px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
+            <h3 style="margin-top: 0;">📝 Редагувати прийом</h3>
+            <input type="hidden" id="currentScanId">
+
+            <label style="font-size: 0.9em; color: #666;">Назва ліків:</label><br>
+            <input type="text" id="medName" placeholder="Напр. Омега-3"
+                style="width: 100%; padding: 8px; margin: 5px 0 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"><br>
+
+            <label style="font-size: 0.9em; color: #666;">Час коли приймати:</label><br>
+            <input type="time" id="remindTime"
+                style="width: 100%; padding: 8px; margin: 5px 0 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"><br>
+
+            <label style="font-size: 0.9em; color: #666;">Кількість таблеток:</label><br>
+            <input type="number" id="dosage" value="1" min="1"
+                style="width: 100%; padding: 8px; margin: 5px 0 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"><br>
+
+            <div style="display: flex; gap: 10px;">
+                <button onclick="saveDetails()"
+                    style="flex: 1; background-color: #4CAF50; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-weight: bold;">Зберегти</button>
+                <button onclick="closeModal()"
+                    style="flex: 1; background-color: #999; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer;">Скасувати</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        const statusLabel = document.getElementById('status');
+        const logsTable = document.getElementById('logs');
+
+        ws.onopen = () => { statusLabel.innerText = "Підключено"; statusLabel.className = "online"; };
+        ws.onclose = () => { statusLabel.innerText = "Відключено"; statusLabel.className = "offline"; };
+
+        // Обробка нових сканувань у реальному часі
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            addTableRow(data, true);
+        };
+
+        // Функція для створення рядка в таблиці
+        function addTableRow(item, isNew = false) {
+            const row = document.createElement('tr');
+            if (isNew) row.className = 'new-row';
+
+            // Налаштовуємо клік для відкриття модалки
+            row.onclick = () => openEditModal(item.id, item.med_name, item.remind_time, item.dosage);
+
+            const time = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const displayId = item.med_name || `<small style="color:gray">${item.nfc_uuid}</small>`;
+
+            row.innerHTML = `
+                <td>${time}</td>
+                <td>${item.device_id}</td>
+                <td><strong>${displayId}</strong></td>
+                <td>${item.remind_time || '--:--'}</td>
+                <td>${item.dosage || 1} шт.</td>
+            `;
+
+            if (isNew) {
+                logsTable.insertBefore(row, logsTable.firstChild);
+            } else {
+                logsTable.appendChild(row);
+            }
+        }
+
+        async function loadHistory() {
+            const response = await fetch('/api/history');
+            const data = await response.json();
+            logsTable.innerHTML = ""; // Очищуємо перед завантаженням
+            data.forEach(item => addTableRow(item));
+        }
+
+        function openEditModal(id, currentName, currentTime, currentDosage) {
+            document.getElementById('currentScanId').value = id;
+            document.getElementById('medName').value = currentName || "";
+            document.getElementById('remindTime').value = currentTime || "";
+            document.getElementById('dosage').value = currentDosage || 1;
+            document.getElementById('editModal').style.display = "block";
+        }
+
+        function closeModal() {
+            document.getElementById('editModal').style.display = "none";
+        }
+
+        async function saveDetails() {
+            const id = document.getElementById('currentScanId').value;
+            const payload = {
+                med_name: document.getElementById('medName').value,
+                remind_time: document.getElementById('remindTime').value,
+                dosage: parseInt(document.getElementById('dosage').value)
+            };
+
+            const response = await fetch(`/api/history/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+                closeModal();
+                loadHistory(); // Перезавантажуємо список, щоб побачити зміни
+            } else {
+                alert("Помилка збереження. Перевір консоль сервера.");
+            }
+        }
+
+        // Початкове завантаження
+        loadHistory();
+    </script>
+</body>
+
+</html>
